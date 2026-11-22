@@ -66,6 +66,7 @@ body.car #catalog{display:none}body.car .big{min-width:74px;min-height:78px;font
 'use strict';
 const $=id=>document.getElementById(id);
 const feed={tv:'https://www.tdtchannels.com/lists/tv.json',radio:'https://www.tdtchannels.com/lists/radio.json'};
+const externalStream={name:'Canal M3U8 añadido',web:'http://185.228.155.93:8000/play/a025/index.m3u8',kind:'tv',region:'Enlace personalizado',externalHttp:true,logo:''};
 const fallback=[
 {name:'Antena 3',web:'https://www.atresplayer.com/directos/',kind:'tv',region:'Nacional'},
 {name:'laSexta',web:'https://www.atresplayer.com/directos/',kind:'tv',region:'Nacional'},
@@ -143,12 +144,12 @@ async function load(){
   // Todas las fuentes juntas: el usuario no pierde la televisión o radio al importar M3U.
   const [tv,radio]=await Promise.all([fetchChannels('tv'),fetchChannels('radio')]);
   if(kind!==mode)return;
-  channels=[...tv,...radio,...myChannels()];render();
+  channels=[externalStream,...tv,...radio,...myChannels()];render();
   if(!tv.length||!radio.length)msg('Algunas listas no han cargado; se muestran los canales disponibles.');
   return;
  }
  const list=await fetchChannels(kind);if(kind!==mode)return;
- channels=list;render();if(!list.length)msg('No se pudo descargar esta lista. Comprueba tu conexión.');
+ channels=kind==='tv'?[externalStream,...list]:list;render();if(!list.length)msg('No se pudo descargar esta lista. Comprueba tu conexión.');
 }
 function render(){
  const q=norm($('search').value),cat=$('category').value;
@@ -170,9 +171,9 @@ function render(){
   const img=document.createElement('img');img.loading='lazy';img.alt='';img.src=ch.logo||'icon.svg';img.onerror=()=>{img.onerror=null;img.src='icon.svg'};
   const b=document.createElement('button');b.className='chname';
   const txt=document.createElement('strong');txt.textContent=ch.name;
-  const detail=document.createElement('span');detail.textContent=(ch.playlistName?ch.playlistName+' · ':'')+(ch.region||'España')+(ch.url?' · Escuchar':' · Web oficial');
+  const detail=document.createElement('span');detail.textContent=(ch.playlistName?ch.playlistName+' · ':'')+(ch.region||'España')+(ch.externalHttp?' · HTTP externo (puede estar bloqueado)':ch.url?' · Escuchar':' · Web oficial');
   b.append(txt,detail);
-  b.onclick=()=>{if(ch.url)listen(ch);else if(ch.web)window.open(ch.web,'_blank','noopener,noreferrer');else msg('No existe emisión disponible para este canal.')};
+  b.onclick=()=>{if(ch.url)listen(ch);else if(ch.web){if(ch.externalHttp)msg('Este enlace utiliza HTTP: los navegadores pueden bloquear su reproducción desde nuestra web HTTPS. Se abrirá fuera del reproductor.');window.open(ch.web,'_blank','noopener,noreferrer');}else msg('No existe emisión disponible para este canal.')};
   const star=document.createElement('button');star.className='star';star.setAttribute('aria-label','Alternar favorito de '+ch.name);
   const key=ch.kind+'|'+ch.name;star.textContent=fav[key]?'★':'☆';
   star.onclick=()=>{fav[key]=!fav[key];put('favorites',fav);star.textContent=fav[key]?'★':'☆';if(cat==='fav')render()};
