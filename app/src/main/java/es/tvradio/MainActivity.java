@@ -32,6 +32,8 @@ public class MainActivity extends Activity {
     private LinearLayout root, lista, catalogo;
     private TextView estado, nombre, contador;
     private Button pausa, dormir;
+    private ImageView logoActual;
+    private String logoMostrado="";
     private EditText buscar;
     private Spinner categoria;
 
@@ -134,11 +136,12 @@ public class MainActivity extends Activity {
 
         prefs=getSharedPreferences("radio",MODE_PRIVATE);
         root=vertical();
-        root.setPadding(dp(12),dp(32),dp(12),dp(12));
+        root.setPadding(dp(12),dp(8),dp(12),dp(8));
+        root.setOnApplyWindowInsetsListener((v,insets)->{v.setPadding(dp(12),insets.getSystemWindowInsetTop()+dp(6),dp(12),insets.getSystemWindowInsetBottom()+dp(6));return insets;});
         root.setBackgroundColor(fondo);
 
-        root.addView(texto("◉ TV Radio España",26,verde));
-        root.addView(texto("Televisión y radio · 3.0",
+        root.addView(texto("◉ TV Radio España",22,verde));
+        root.addView(texto("Televisión y radio · 4.0",
             13,Color.LTGRAY));
 
         LinearLayout player=vertical();
@@ -147,11 +150,20 @@ public class MainActivity extends Activity {
 
         nombre=texto("Selecciona un canal",25,Color.WHITE);
         nombre.setGravity(Gravity.CENTER);
-        player.addView(nombre);
+        LinearLayout cabecera=new LinearLayout(this);
+        cabecera.setGravity(Gravity.CENTER_VERTICAL);
+        logoActual=new ImageView(this);
+        logoActual.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        logoActual.setImageResource(R.drawable.ic_launcher);
+        cabecera.addView(logoActual,new LinearLayout.LayoutParams(dp(58),dp(58)));
+        LinearLayout detalles=vertical();
+        cabecera.addView(detalles,new LinearLayout.LayoutParams(0,-2,1));
+        detalles.addView(nombre);
 
         estado=texto("Preparando reproductor",14,verde);
         estado.setGravity(Gravity.CENTER);
-        player.addView(estado);
+        detalles.addView(estado);
+        player.addView(cabecera);
 
         LinearLayout controles=new LinearLayout(this);
 
@@ -239,6 +251,10 @@ public class MainActivity extends Activity {
         });
 
         root.addView(modos);
+        LinearLayout servicios=new LinearLayout(this);
+        accion(servicios,"Guía TV",v->abrirWeb("https://www.rtve.es/play/guia/"));
+        accion(servicios,"Actualizaciones",v->buscarActualizacion());
+        root.addView(servicios);
 
         catalogo=vertical();
 
@@ -247,6 +263,7 @@ public class MainActivity extends Activity {
         accion(tipo,"📺 Televisión",v->{
             if(cargando)return;
             radio=false;
+            canales.clear();mostrar();
             categoria.setSelection(0);
             cargarCanales();
         });
@@ -254,6 +271,7 @@ public class MainActivity extends Activity {
         accion(tipo,"📻 Radio",v->{
             if(cargando)return;
             radio=true;
+            canales.clear();mostrar();
             categoria.setSelection(0);
             cargarCanales();
         });
@@ -360,6 +378,9 @@ public class MainActivity extends Activity {
 
         CharSequence t=controller.getMediaMetadata().title;
         if(t!=null)nombre.setText(t);
+        android.net.Uri arte=controller.getMediaMetadata().artworkUri;
+        String enlace=arte==null?"":arte.toString();
+        if(!enlace.equals(logoMostrado)){logoMostrado=enlace;logoActual.setImageResource(R.drawable.ic_launcher);logo(enlace,logoActual);}
 
         if(controller.getPlayerError()!=null){
             estado.setText("Error de emisión");
@@ -373,6 +394,44 @@ public class MainActivity extends Activity {
         }
 
         pausa.setText(controller.getPlayWhenReady()?"Ⅱ":"▶");
+    }
+
+    private void abrirWeb(String url){
+        try{startActivity(new Intent(Intent.ACTION_VIEW,android.net.Uri.parse(url)));}
+        catch(Exception e){Toast.makeText(this,"No hay navegador disponible",Toast.LENGTH_SHORT).show();}
+    }
+
+    private void buscarActualizacion(){
+        Toast.makeText(this,"Consultando versiones...",Toast.LENGTH_SHORT).show();
+        new Thread(()->{
+            try{
+                java.net.URLConnection c=new URL("https://api.github.com/repos/serbarbo-dotcom/tv-radio-espana/releases/latest").openConnection();
+                c.setConnectTimeout(10000);c.setReadTimeout(10000);
+                c.setRequestProperty("Accept","application/vnd.github+json");
+                JSONObject j;
+                try(Scanner sc=new Scanner(c.getInputStream(),"UTF-8")){
+                    j=new JSONObject(sc.useDelimiter("\\A").next());
+                }
+                String tag=j.optString("tag_name");
+                String pagina=j.optString("html_url");
+                String instalada=getPackageManager().getPackageInfo(getPackageName(),0).versionName;
+                runOnUiThread(()->{
+                    if(cerrada)return;
+                    new AlertDialog.Builder(this).setTitle("Actualizaciones")
+                        .setMessage("Instalada: "+instalada+"\nÚltima publicación: "+tag)
+                        .setPositiveButton("Ver publicación",(d,w)->abrirWeb(pagina))
+                        .setNegativeButton("Cerrar",null).show();
+                });
+            }catch(Exception e){
+                runOnUiThread(()->{
+                    if(cerrada)return;
+                    new AlertDialog.Builder(this).setTitle("Actualizaciones")
+                        .setMessage("No se ha podido consultar una publicación. Puedes revisar las versiones en GitHub.")
+                        .setPositiveButton("Ver versiones",(d,w)->abrirWeb("https://github.com/serbarbo-dotcom/tv-radio-espana/releases"))
+                        .setNegativeButton("Cerrar",null).show();
+                });
+            }
+        }).start();
     }
 
     private void alternar(){
@@ -725,7 +784,7 @@ public class MainActivity extends Activity {
                         cache.put(url,img);
 
                         runOnUiThread(()->{
-                            if(!cerrada)vista.setImageBitmap(img);
+                            if(!cerrada && (vista!=logoActual || url.equals(logoMostrado)))vista.setImageBitmap(img);
                         });
                     }
                 }
