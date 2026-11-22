@@ -1,0 +1,18 @@
+{
+  "name": "TV Radio España",
+  "short_name": "TV Radio",
+  "description": "Escucha los canales de televisión y radio en directo",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#101827",
+  "theme_color": "#101827",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
