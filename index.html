@@ -52,7 +52,7 @@ body.car #catalog{display:none}body.car .big{min-width:74px;min-height:78px;font
 </section>
 <section id="catalog" class="panel" aria-label="Listado de canales">
  <div class="tabs"><button id="all" class="active">📚 Todos</button><button id="tv">📺 Televisión</button><button id="radio">📻 Radio</button><button id="playlist">📋 Mis listas M3U</button><button id="refresh">↻ Actualizar</button></div>
- <details class="m3u-panel" id="m3uTools"><summary>➕ Añadir lista M3U / M3U8</summary><p class="muted">Importa tu archivo .m3u o pega la dirección HTTPS de una lista. Se guarda únicamente en este navegador, no en GitHub.</p><label class="muted" for="m3uFile">Desde archivo</label><input type="file" id="m3uFile" accept=".m3u,.m3u8,.txt,audio/x-mpegurl,application/vnd.apple.mpegurl,text/plain"><div class="toolbar"><input type="url" id="m3uUrl" placeholder="https://ejemplo.com/playlist.m3u" aria-label="Dirección URL M3U"><button id="m3uImport">Importar URL</button></div><div class="toolbar"><button id="m3uClear">Borrar mi lista</button></div><p id="m3uResult" class="muted" aria-live="polite"></p><p class="muted">Las URL deben permitir acceso desde el navegador (CORS). Solo se admiten conexiones HTTPS; algunas emisiones pueden estar bloqueadas o no tener audio reproducible.</p></details>
+ <details class="m3u-panel" id="m3uTools"><summary>➕ Añadir lista M3U / M3U8</summary><p class="muted">Importa varias listas M3U, ponles nombre y elige cuál quieres ver. Las listas se guardan en este navegador, no en GitHub.</p><label class="muted" for="m3uFile">Desde archivo</label><input type="file" id="m3uFile" accept=".m3u,.m3u8,.txt,audio/x-mpegurl,application/vnd.apple.mpegurl,text/plain"><div class="toolbar"><input type="url" id="m3uUrl" placeholder="https://ejemplo.com/playlist.m3u" aria-label="Dirección URL M3U"><button id="m3uImport">Importar URL</button></div><div class="toolbar"><label class="muted" for="m3uName">Nombre de la nueva lista</label><input id="m3uName" type="text" maxlength="60" placeholder="Por ejemplo: Deportes"></div><div class="toolbar"><label for="m3uSelect">Lista guardada</label><select id="m3uSelect" aria-label="Elegir lista guardada"><option value="all">Todas las listas</option></select><button id="m3uRename">Renombrar</button><button id="m3uClear">Borrar seleccionada</button></div><div id="m3uSaved" class="muted"></div><p id="m3uResult" class="muted" aria-live="polite"></p><p class="muted">Las URL deben permitir acceso desde el navegador (CORS). Solo se admiten conexiones HTTPS; algunas emisiones pueden estar bloqueadas o no tener audio reproducible.</p></details>
  <div id="searchline"><input id="search" type="search" placeholder="Buscar canal o emisora..." aria-label="Buscar canal"></div>
  <div class="filters"><select id="category" aria-label="Filtrar canales"><option value="all">Todos los canales</option><option value="fav">★ Favoritos</option><option value="national">Nacionales</option><option value="regional">Autonómicos / locales</option><option value="news">Noticias</option><option value="sports">Deportes</option><option value="music">Música</option></select></div>
  <p class="muted" id="count">Cargando canales...</p>
@@ -74,10 +74,19 @@ const fallback=[
 {name:'La 7 (CyLTV)',web:'https://www.cyltv.es/',kind:'tv',region:'Castilla y León'}
 ];
 let mode='all',channels=[],visible=[],active=null,hls=null,offAt=0,installPrompt=null;
-let myPlaylist=get('personal_m3u',[]);
 const media=$('media'),status=$('status');
 const get=(key,def)=>{try{return JSON.parse(localStorage.getItem('tr_'+key))??def}catch{return def}};
-const put=(key,val)=>{try{localStorage.setItem('tr_'+key,JSON.stringify(val))}catch{}};
+const put=(key,val)=>{try{localStorage.setItem('tr_'+key,JSON.stringify(val));return true}catch{return false}};
+let playlists=get('playlists_m3u',null);
+if(!Array.isArray(playlists)){
+ const legacy=get('personal_m3u',[]);
+ playlists=Array.isArray(legacy)&&legacy.length?[{id:'migrada',name:'Mi primera lista',channels:legacy}]:[];
+ put('playlists_m3u',playlists);
+}
+playlists=playlists.filter(p=>p&&typeof p.id==='string'&&typeof p.name==='string'&&Array.isArray(p.channels));
+let selectedPlaylist='all';
+const myChannels=()=>playlists.flatMap(p=>p.channels.map(ch=>({...ch,playlistId:p.id,playlistName:p.name})));
+const selectedChannels=()=>selectedPlaylist==='all'?myChannels():myChannels().filter(c=>c.playlistId===selectedPlaylist);
 let fav=get('favorites',{}),history=get('history',[]);
 const norm=v=>String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
 function msg(t){$('message').textContent=t}
@@ -129,12 +138,12 @@ async function fetchChannels(kind){
 }
 async function load(){
  const kind=mode;msg('');$('count').textContent='Actualizando canales...';
- if(kind==='m3u'){channels=myPlaylist;render();return}
+ if(kind==='m3u'){channels=selectedChannels();render();return}
  if(kind==='all'){
   // Todas las fuentes juntas: el usuario no pierde la televisión o radio al importar M3U.
   const [tv,radio]=await Promise.all([fetchChannels('tv'),fetchChannels('radio')]);
   if(kind!==mode)return;
-  channels=[...tv,...radio,...myPlaylist];render();
+  channels=[...tv,...radio,...myChannels()];render();
   if(!tv.length||!radio.length)msg('Algunas listas no han cargado; se muestran los canales disponibles.');
   return;
  }
@@ -154,14 +163,14 @@ function render(){
   if(cat==='music'&&!/musica|radio 3|los40|dial|rock|kiss|melodia|hit|cadena 100/.test(n))return false;
   return true;
  });
- $('count').textContent=visible.length+' canales y emisoras · '+channels.filter(c=>!!c.url).length+' con señal directa · '+myPlaylist.length+' M3U propios';
+ $('count').textContent=visible.length+' canales y emisoras · '+channels.filter(c=>!!c.url).length+' con señal directa · '+myChannels().length+' M3U propios en '+playlists.length+' listas';
  const holder=$('list');holder.replaceChildren();
  for(const ch of visible){
   const row=document.createElement('div');row.className='row';
   const img=document.createElement('img');img.loading='lazy';img.alt='';img.src=ch.logo||'icon.svg';img.onerror=()=>{img.onerror=null;img.src='icon.svg'};
   const b=document.createElement('button');b.className='chname';
   const txt=document.createElement('strong');txt.textContent=ch.name;
-  const detail=document.createElement('span');detail.textContent=(ch.region||'España')+(ch.url?' · Escuchar':' · Web oficial');
+  const detail=document.createElement('span');detail.textContent=(ch.playlistName?ch.playlistName+' · ':'')+(ch.region||'España')+(ch.url?' · Escuchar':' · Web oficial');
   b.append(txt,detail);
   b.onclick=()=>{if(ch.url)listen(ch);else if(ch.web)window.open(ch.web,'_blank','noopener,noreferrer');else msg('No existe emisión disponible para este canal.')};
   const star=document.createElement('button');star.className='star';star.setAttribute('aria-label','Alternar favorito de '+ch.name);
@@ -232,19 +241,53 @@ function parseM3U(text){
  const seen=new Set();
  return items.filter(x=>{if(seen.has(x.url))return false;seen.add(x.url);return true});
 }
-function savePlaylist(items){
- if(!items.length)throw Error('No se encontraron enlaces HTTPS compatibles en la lista.');
- // Evita almacenar enormes cantidades de datos en el navegador.
- const size=JSON.stringify(items).length;
- if(size>1800000)throw Error('La lista ocupa demasiado espacio para guardarla aquí.');
- myPlaylist=items;put('personal_m3u',myPlaylist);
- $('m3uResult').textContent='✓ '+items.length+' canales importados. Guardados en este navegador.';
- switchMode('all');channels=[...channels,...myPlaylist];load();
+
+function refreshPlaylistPicker(){
+ const sel=$('m3uSelect');sel.replaceChildren();
+ const all=document.createElement('option');all.value='all';all.textContent='Todas las listas';sel.append(all);
+ for(const p of playlists){
+  const opt=document.createElement('option');opt.value=p.id;opt.textContent=p.name+' ('+p.channels.length+')';sel.append(opt);
+ }
+ if(selectedPlaylist!=='all'&&!playlists.some(p=>p.id===selectedPlaylist))selectedPlaylist='all';
+ sel.value=selectedPlaylist;
+ $('m3uSaved').textContent=playlists.length+' listas guardadas · '+myChannels().length+' canales M3U';
 }
+function savePlaylist(items,defaultName){
+ if(!items.length)throw Error('No se encontraron enlaces HTTPS compatibles en la lista.');
+ const name=($('m3uName').value.trim()||defaultName||'Lista M3U').slice(0,60);
+ if(playlists.length>=20)throw Error('Máximo 20 listas. Borra una antigua.');
+ const id='lista-'+Date.now()+'-'+Math.random().toString(36).slice(2,8);
+ const next=[...playlists,{id,name,channels:items}];
+ if(JSON.stringify(next).length>3500000)throw Error('Has alcanzado el límite de almacenamiento para las listas. Prueba con listas más pequeñas.');
+ if(!put('playlists_m3u',next))throw Error('No se pudo guardar: almacenamiento del navegador lleno o desactivado.');
+ playlists=next;selectedPlaylist=id;refreshPlaylistPicker();
+ $('m3uResult').textContent='✓ Lista "'+name+'" añadida con '+items.length+' canales. Las anteriores se conservan.';
+ $('m3uName').value='';
+ if(mode==='m3u')load();
+ else switchMode('m3u');
+}
+$('m3uSelect').onchange=e=>{
+ selectedPlaylist=e.target.value;
+ if(mode!=='m3u')switchMode('m3u');else load();
+};
+$('m3uRename').onclick=()=>{
+ if(selectedPlaylist==='all'){$('m3uResult').textContent='Selecciona una lista concreta para cambiarle el nombre.';return}
+ const p=playlists.find(x=>x.id===selectedPlaylist);if(!p)return;
+ const name=prompt('Nuevo nombre de la lista:',p.name);
+ if(name===null)return;
+ const cleaned=name.trim().slice(0,60);
+ if(!cleaned){$('m3uResult').textContent='Escribe un nombre válido.';return}
+ const old=p.name;p.name=cleaned;
+ if(!put('playlists_m3u',playlists)){p.name=old;$('m3uResult').textContent='No se pudo guardar el nombre.';return}
+ refreshPlaylistPicker();if(mode==='m3u')load();
+ $('m3uResult').textContent='Nombre actualizado.';
+};
 $('m3uFile').addEventListener('change',async e=>{
  const file=e.target.files?.[0];if(!file)return;
- try{if(file.size>2500000)throw Error('Archivo demasiado grande (máximo 2,5 MB).');savePlaylist(parseM3U(await file.text()))}
- catch(err){$('m3uResult').textContent='No se pudo importar: '+err.message}
+ try{
+  if(file.size>2500000)throw Error('Archivo demasiado grande (máximo 2,5 MB).');
+  savePlaylist(parseM3U(await file.text()),file.name.replace(/\.m3u8?$/i,''));
+ }catch(err){$('m3uResult').textContent='No se pudo importar: '+err.message}
  e.target.value='';
 });
 $('m3uImport').onclick=async()=>{
@@ -257,16 +300,22 @@ $('m3uImport').onclick=async()=>{
   const len=Number(response.headers.get('content-length')||'0');
   if(len>2500000)throw Error('Archivo demasiado grande');
   const content=await response.text();
-  if(/^\s*#EXT-X-/m.test(content)&&!/^\s*#EXTINF:[^\r\n]*,/m.test(content))throw Error('Esta dirección es un único flujo HLS (.m3u8), no una lista de canales M3U.');
-  savePlaylist(parseM3U(content));
+  if(content.length>2500000)throw Error('Archivo demasiado grande');
+  if(/^\s*#EXT-X-/m.test(content)&&!/^\s*#EXTINF:[^\r\n]*,/m.test(content))throw Error('La URL es un único flujo HLS, no una lista de canales.');
+  savePlaylist(parseM3U(content),new URL(url).pathname.split('/').pop().replace(/\.m3u8?$/i,'')||'Lista URL');
  }catch(err){$('m3uResult').textContent='No se pudo importar. Comprueba el enlace y que el servidor permita CORS. '+err.message}
  finally{b.disabled=false}
 };
 $('m3uClear').onclick=()=>{
- if(!confirm('¿Borrar los canales M3U guardados en este navegador?'))return;
- myPlaylist=[];put('personal_m3u',[]);$('m3uResult').textContent='Lista borrada.';
- if(mode==='m3u'||mode==='all')load()
+ if(selectedPlaylist==='all'){$('m3uResult').textContent='Selecciona una lista concreta para borrarla; las demás se conservarán.';return}
+ const p=playlists.find(x=>x.id===selectedPlaylist);if(!p)return;
+ if(!confirm('¿Borrar "'+p.name+'" ('+p.channels.length+' canales)? No se borrarán las demás listas.'))return;
+ const next=playlists.filter(x=>x.id!==selectedPlaylist);
+ if(!put('playlists_m3u',next)){$('m3uResult').textContent='No se pudo guardar el cambio.';return}
+ playlists=next;selectedPlaylist='all';refreshPlaylistPicker();load();
+ $('m3uResult').textContent='Lista borrada. Las demás siguen guardadas.';
 };
+refreshPlaylistPicker();
 $('search').oninput=render;$('category').onchange=render;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('install').hidden=false});
 $('install').onclick=async()=>{if(installPrompt){installPrompt.prompt();installPrompt=null}};
