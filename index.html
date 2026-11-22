@@ -68,6 +68,7 @@ const fallback=[
 {name:'Antena 3',web:'https://www.atresplayer.com/directos/',kind:'tv',region:'Nacional'},
 {name:'laSexta',web:'https://www.atresplayer.com/directos/',kind:'tv',region:'Nacional'},
 {name:'Telecinco',web:'https://www.telecinco.es/endirecto/',kind:'tv',region:'Nacional'},
+{name:'La Séptima (nacional)',web:'https://laseptima.com/',kind:'tv',region:'Nacional'},
 {name:'La 7 (CyLTV)',web:'https://www.cyltv.es/',kind:'tv',region:'Castilla y León'}
 ];
 let mode='tv',channels=[],visible=[],active=null,hls=null,offAt=0,installPrompt=null;
@@ -100,8 +101,8 @@ function parseFeed(data,kind){
  }
  if(kind==='tv'){
   for(const f of fallback){
-   const existing=result.find(x=>norm(x.name)===norm(f.name));
-   if(existing){if(!existing.url)existing.web=existing.web||f.web}
+   const existing=result.find(x=>norm(x.name)===norm(f.name)||(f.name==='La Séptima (nacional)'&&norm(x.name)==='la septima'));
+   if(existing){if(!existing.url)existing.web=existing.web||f.web; if(f.name==='La Séptima (nacional)'){existing.name=f.name;existing.region='Nacional'}}
    else result.unshift({...f,url:'',logo:''});
   }
  }
@@ -122,7 +123,7 @@ async function load(){
  if(kind!==mode)return;
  channels=get('cache_'+kind,[]);
  if(kind==='tv'){
-  for(const f of fallback)if(!channels.some(x=>norm(x.name)===norm(f.name)))channels.unshift({...f,url:'',logo:''});
+  for(const f of fallback)if(!channels.some(x=>norm(x.name)===norm(f.name)||(f.name==='La Séptima (nacional)'&&norm(x.name)==='la septima')))channels.unshift({...f,url:'',logo:''});
  }
  render();msg(channels.length?'Se muestra la última lista guardada.':'No se pudo descargar la lista. Comprueba tu conexión.');
 }
