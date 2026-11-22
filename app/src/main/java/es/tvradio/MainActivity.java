@@ -619,6 +619,7 @@ public class MainActivity extends Activity {
                             JSONArray opciones=canal.optJSONArray("options");
 
                             if(opciones==null)continue;
+                            boolean añadido=false;
 
                             for(int n=0;n<opciones.length();n++){
 
@@ -648,11 +649,23 @@ public class MainActivity extends Activity {
                                         region.optString("name")
                                     });
 
+                                    añadido=true;
                                     break;
                                 }
                             }
+                            if(!añadido && !esRadio &&
+                               (canal.optString("name").equals("Telecinco") ||
+                                canal.optString("name").equals("La 7 (CyLTV)"))) {
+                                String web=canal.optString("web");
+                                if(web.startsWith("https://"))
+                                    nuevos.add(new String[]{canal.optString("name"), "",canal.optString("logo"),region.optString("name"),web});
+                            }
                         }
                     }
+                }
+                if(!esRadio){
+                    nuevos.add(0,new String[]{"Antena 3","","","Generalistas","https://www.atresplayer.com/directos/"});
+                    nuevos.add(1,new String[]{"laSexta","","","Generalistas","https://www.atresplayer.com/directos/"});
                 }
 
                 runOnUiThread(()->{
@@ -723,7 +736,18 @@ public class MainActivity extends Activity {
 
             Button b=boton(c[0]);
             b.setGravity(Gravity.CENTER_VERTICAL);
-            b.setOnClickListener(v->reproducir(c[0],c[1],c[2]));
+            if(c[1].isEmpty()){
+                b.setText(c[0]+" · Web oficial");
+                b.setOnClickListener(v->{
+                    new AlertDialog.Builder(this)
+                        .setTitle(c[0])
+                        .setMessage("Este canal no ofrece en nuestra lista una señal directa compatible con la escucha en segundo plano. Puedes abrir su emisión oficial en el navegador.")
+                        .setPositiveButton("Abrir web oficial",(d,w)->abrirWeb(c[4]))
+                        .setNegativeButton("Cancelar",null).show();
+                });
+            }else{
+                b.setOnClickListener(v->reproducir(c[0],c[1],c[2]));
+            }
 
             fila.addView(b,new LinearLayout.LayoutParams(0,-2,1));
 
