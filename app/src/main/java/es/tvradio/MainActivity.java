@@ -1,40 +1,26 @@
 package es.tvradio;
 
-import android.app.Activity;
-import android.app.AlertDialog;
-import android.os.Bundle;
-import android.content.ComponentName;
-import android.content.SharedPreferences;
-import android.graphics.Color;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
+import android.app.*;
+import android.os.*;
+import android.content.*;
+import android.content.res.ColorStateList;
+import android.graphics.*;
 import android.graphics.drawable.GradientDrawable;
 import android.media.AudioManager;
+import android.view.*;
 import android.widget.*;
-import android.view.View;
-import android.view.Gravity;
-import android.text.TextWatcher;
-import android.text.Editable;
+import android.text.*;
 import android.util.LruCache;
 
-import androidx.media3.common.MediaItem;
-import androidx.media3.common.MediaMetadata;
-import androidx.media3.common.Player;
-import androidx.media3.session.MediaController;
-import androidx.media3.session.SessionToken;
-
+import androidx.media3.common.*;
+import androidx.media3.session.*;
 import com.google.common.util.concurrent.ListenableFuture;
 
-import org.json.JSONArray;
-import org.json.JSONObject;
-
+import org.json.*;
 import java.net.URL;
-import java.util.Scanner;
-import java.util.ArrayList;
-import java.util.Locale;
+import java.util.*;
 import java.text.Normalizer;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.*;
 
 public class MainActivity extends Activity {
 
@@ -42,159 +28,170 @@ public class MainActivity extends Activity {
     private ListenableFuture<MediaController> future;
     private SharedPreferences prefs;
 
-    private LinearLayout lista;
-    private TextView estado, contador, nombreActual;
-    private EditText buscador;
-    private Spinner categoria;
+    private LinearLayout root, lista, catalogo;
+    private TextView estado, nombre, contador;
     private Button pausa, dormir;
+    private EditText buscar;
+    private Spinner categoria;
 
-    private final ArrayList<String[]> canales =
-        new ArrayList<>();
+    private boolean radio=false;
+    private boolean cargando=false;
+    private boolean cerrada=false;
+    private boolean coche=false;
+    private boolean noche=false;
 
-    private final ExecutorService imagenes =
+    private final int fondo=Color.rgb(15,23,42);
+    private final int tarjeta=Color.rgb(30,41,59);
+    private final int verde=Color.rgb(74,222,128);
+
+    private final ArrayList<String[]> canales=new ArrayList<>();
+    private final ArrayList<String[]> visibles=new ArrayList<>();
+
+    private final ExecutorService imagenes=
         Executors.newFixedThreadPool(4);
 
-    private final LruCache<String,Bitmap> cache =
+    private final LruCache<String,Bitmap> cache=
         new LruCache<>(80);
 
-    private final int fondo = Color.rgb(15,23,42);
-    private final int tarjeta = Color.rgb(30,41,59);
-    private final int verde = Color.rgb(74,222,128);
+    private final Handler reloj=
+        new Handler(Looper.getMainLooper());
 
-    private boolean cerrada = false;
-    private boolean cargando = false;
+    private final Runnable cuenta=new Runnable(){
+        public void run(){
+            if(cerrada)return;
 
-    private int dp(int n) {
-        return (int)(n *
-            getResources().getDisplayMetrics().density);
+            long restante=prefs.getLong("sleepUntil",0)
+                -System.currentTimeMillis();
+
+            if(restante>0){
+                long s=restante/1000;
+                dormir.setText(String.format(
+                    Locale.ROOT,"◷ %02d:%02d:%02d",
+                    s/3600,(s/60)%60,s%60));
+            }else{
+                dormir.setText("◷ Temporizador");
+            }
+
+            reloj.postDelayed(this,1000);
+        }
+    };
+
+    private int dp(int n){
+        return (int)(n*getResources()
+            .getDisplayMetrics().density);
     }
 
-    private GradientDrawable redondo(int color) {
-        GradientDrawable d = new GradientDrawable();
-        d.setColor(color);
-        d.setCornerRadius(dp(14));
-        return d;
+    private String normal(String s){
+        return Normalizer.normalize(s,Normalizer.Form.NFD)
+            .replaceAll("\\p{M}","")
+            .toLowerCase(Locale.ROOT);
     }
 
-    private TextView texto(String t,int size,int color) {
-        TextView v = new TextView(this);
-        v.setText(t);
-        v.setTextSize(size);
-        v.setTextColor(color);
-        return v;
+    private GradientDrawable forma(int color){
+        GradientDrawable g=new GradientDrawable();
+        g.setColor(color);
+        g.setCornerRadius(dp(14));
+        return g;
     }
 
-    private Button boton(String t) {
-        Button b = new Button(this);
-        b.setText(t);
+    private TextView texto(String s,int size,int color){
+        TextView t=new TextView(this);
+        t.setText(s);
+        t.setTextSize(size);
+        t.setTextColor(color);
+        return t;
+    }
+
+    private Button boton(String s){
+        Button b=new Button(this);
+        b.setText(s);
         b.setAllCaps(false);
         b.setTextColor(Color.WHITE);
         b.setBackgroundTintList(
-            android.content.res.ColorStateList.valueOf(tarjeta));
+            ColorStateList.valueOf(tarjeta));
+        return b;
+    }
+
+    private LinearLayout vertical(){
+        LinearLayout l=new LinearLayout(this);
+        l.setOrientation(LinearLayout.VERTICAL);
+        return l;
+    }
+
+    private Button accion(LinearLayout fila,String titulo,
+        View.OnClickListener click){
+
+        Button b=boton(titulo);
+        b.setOnClickListener(click);
+        fila.addView(b,new LinearLayout.LayoutParams(0,-2,1));
         return b;
     }
 
     @Override
-    public void onCreate(Bundle savedInstanceState) {
+    public void onCreate(Bundle savedInstanceState){
         super.onCreate(savedInstanceState);
 
-        prefs = getSharedPreferences(
-            "radio", MODE_PRIVATE);
-
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(14),dp(32),dp(14),dp(12));
+        prefs=getSharedPreferences("radio",MODE_PRIVATE);
+        root=vertical();
+        root.setPadding(dp(12),dp(32),dp(12),dp(12));
         root.setBackgroundColor(fondo);
 
-        TextView titulo = texto(
-            "◉ TV Radio España",26,verde);
-
-        root.addView(titulo);
-        root.addView(texto(
-            "Televisión en directo · Solo audio",
+        root.addView(texto("◉ TV Radio España",26,verde));
+        root.addView(texto("Televisión y radio · 3.0",
             13,Color.LTGRAY));
 
-        LinearLayout player = new LinearLayout(this);
-        player.setOrientation(LinearLayout.VERTICAL);
-        player.setPadding(dp(12),dp(10),dp(12),dp(10));
-        player.setBackground(redondo(tarjeta));
+        LinearLayout player=vertical();
+        player.setPadding(dp(10),dp(8),dp(10),dp(8));
+        player.setBackground(forma(tarjeta));
 
-        nombreActual = texto(
-            "Selecciona un canal",24,Color.WHITE);
+        nombre=texto("Selecciona un canal",25,Color.WHITE);
+        nombre.setGravity(Gravity.CENTER);
+        player.addView(nombre);
 
-        nombreActual.setGravity(Gravity.CENTER);
-        player.addView(nombreActual);
-
-        estado = texto(
-            "Preparando reproductor",14,verde);
-
+        estado=texto("Preparando reproductor",14,verde);
         estado.setGravity(Gravity.CENTER);
         player.addView(estado);
 
-        LinearLayout controles = new LinearLayout(this);
+        LinearLayout controles=new LinearLayout(this);
 
-        pausa = boton("▶ Reproducir");
+        accion(controles,"◀",v->cambiar(-1));
+
+        pausa=accion(controles,"▶",v->alternar());
+        pausa.setTextSize(22);
         pausa.setTextColor(verde);
 
-        pausa.setOnClickListener(v -> {
+        accion(controles,"▶▶",v->cambiar(1));
 
-            if(controller == null) return;
-
-            if(controller.getPlayWhenReady()) {
-                controller.pause();
-            } else if(controller.getCurrentMediaItem()!=null) {
-                controller.prepare();
-                controller.play();
-            } else {
-                ultimoCanal();
-            }
-        });
-
-        controles.addView(pausa,
-            new LinearLayout.LayoutParams(0,-2,1));
-
-        Button detener = boton("■ Detener");
-
-        detener.setOnClickListener(v -> {
-            if(controller != null) {
+        accion(controles,"■",v->{
+            if(controller!=null){
                 controller.pause();
                 controller.stop();
                 estado.setText("Detenido");
             }
         });
 
-        controles.addView(detener,
-            new LinearLayout.LayoutParams(0,-2,1));
-
         player.addView(controles);
 
-        AudioManager audio = (AudioManager)
+        AudioManager audio=(AudioManager)
             getSystemService(AUDIO_SERVICE);
 
-        setVolumeControlStream(
-            AudioManager.STREAM_MUSIC);
+        setVolumeControlStream(AudioManager.STREAM_MUSIC);
 
-        player.addView(texto(
-            "Volumen",12,Color.LTGRAY));
+        player.addView(texto("Volumen",12,Color.LTGRAY));
 
-        SeekBar volumen = new SeekBar(this);
-
+        SeekBar volumen=new SeekBar(this);
         volumen.setMax(audio.getStreamMaxVolume(
             AudioManager.STREAM_MUSIC));
-
         volumen.setProgress(audio.getStreamVolume(
             AudioManager.STREAM_MUSIC));
 
         volumen.setOnSeekBarChangeListener(
-            new SeekBar.OnSeekBarChangeListener() {
+            new SeekBar.OnSeekBarChangeListener(){
 
             public void onProgressChanged(
-                SeekBar b,int p,boolean user) {
-
-                if(user) {
-                    audio.setStreamVolume(
-                        AudioManager.STREAM_MUSIC,p,0);
-                }
+                SeekBar b,int p,boolean user){
+                if(user)audio.setStreamVolume(
+                    AudioManager.STREAM_MUSIC,p,0);
             }
 
             public void onStartTrackingTouch(SeekBar b){}
@@ -203,320 +200,386 @@ public class MainActivity extends Activity {
 
         player.addView(volumen);
 
-        LinearLayout extras = new LinearLayout(this);
+        LinearLayout extras=new LinearLayout(this);
 
-        dormir = boton("◷ Temporizador");
-        dormir.setOnClickListener(v -> temporizador());
-
-        extras.addView(dormir,
-            new LinearLayout.LayoutParams(0,-2,1));
-
-        Button ultimo = boton("Último canal");
-        ultimo.setOnClickListener(v -> ultimoCanal());
-
-        extras.addView(ultimo,
-            new LinearLayout.LayoutParams(0,-2,1));
+        dormir=accion(extras,"◷ Temporizador",v->temporizador());
+        accion(extras,"Último canal",v->ultimo());
 
         player.addView(extras);
+        root.addView(player);
 
-        LinearLayout.LayoutParams margen =
-            new LinearLayout.LayoutParams(-1,-2);
+        LinearLayout modos=new LinearLayout(this);
 
-        margen.setMargins(0,dp(12),0,dp(8));
+        accion(modos,"Historial",v->historial());
 
-        root.addView(player,margen);
+        accion(modos,"Coche",v->{
+            coche=!coche;
+            catalogo.setVisibility(coche?View.GONE:View.VISIBLE);
+            nombre.setTextSize(coche?38:25);
+            pausa.setTextSize(coche?38:22);
 
-        buscador = new EditText(this);
-        buscador.setSingleLine(true);
-        buscador.setHint("Buscar canal...");
-        buscador.setTextColor(Color.WHITE);
-        buscador.setHintTextColor(Color.LTGRAY);
-        root.addView(buscador);
+            for(int i=0;i<controles.getChildCount();i++){
+                controles.getChildAt(i)
+                    .setMinimumHeight(dp(coche?88:48));
+            }
 
-        categoria = new Spinner(this);
+            ((Button)v).setText(coche?"Salir coche":"Coche");
+        });
 
-        categoria.setAdapter(
-            new ArrayAdapter<String>(
-                this,
-                android.R.layout.simple_spinner_dropdown_item,
-                new String[]{
-                    "Todos los canales",
-                    "★ Favoritos",
-                    "Nacionales",
-                    "Autonómicos y locales",
-                    "Noticias",
-                    "Deportes"
-                }));
+        accion(modos,"Noche",v->{
+            noche=!noche;
+            WindowManager.LayoutParams w=
+                getWindow().getAttributes();
 
-        root.addView(categoria);
-LinearLayout tipo = new LinearLayout(this);
+            w.screenBrightness=noche?0.05f:-1f;
+            getWindow().setAttributes(w);
 
-Button television = boton("📺 Televisión");
-Button radio = boton("📻 Radio");
+            ((Button)v).setText(noche?"Día":"Noche");
+        });
 
-television.setOnClickListener(v -> {
-    if(cargando) return;
-    modoRadio = false;
-    cargarCanales();
-});
+        root.addView(modos);
 
-radio.setOnClickListener(v -> {
-    if(cargando) return;
-    modoRadio = true;
-    cargarCanales();
-});
+        catalogo=vertical();
 
-tipo.addView(television,
-    new LinearLayout.LayoutParams(0,-2,1));
+        LinearLayout tipo=new LinearLayout(this);
 
-tipo.addView(radio,
-    new LinearLayout.LayoutParams(0,-2,1));
+        accion(tipo,"📺 Televisión",v->{
+            if(cargando)return;
+            radio=false;
+            categoria.setSelection(0);
+            cargarCanales();
+        });
 
-root.addView(tipo);
-        LinearLayout herramientas = new LinearLayout(this);
-        herramientas.setGravity(Gravity.CENTER_VERTICAL);
+        accion(tipo,"📻 Radio",v->{
+            if(cargando)return;
+            radio=true;
+            categoria.setSelection(0);
+            cargarCanales();
+        });
 
-        contador = texto(
-            "Cargando canales...",13,Color.LTGRAY);
+        catalogo.addView(tipo);
 
+        buscar=new EditText(this);
+        buscar.setSingleLine(true);
+        buscar.setHint("Buscar canal o emisora...");
+        buscar.setTextColor(Color.WHITE);
+        buscar.setHintTextColor(Color.LTGRAY);
+        catalogo.addView(buscar);
+
+        categoria=new Spinner(this);
+
+        categoria.setAdapter(new ArrayAdapter<String>(
+            this,
+            android.R.layout.simple_spinner_dropdown_item,
+            new String[]{
+                "Todos",
+                "★ Favoritos",
+                "Nacionales",
+                "Autonómicos y locales",
+                "Noticias",
+                "Deportes",
+                "Música"
+            }));
+
+        catalogo.addView(categoria);
+
+        LinearLayout herramientas=new LinearLayout(this);
+
+        contador=texto("Cargando...",13,Color.LTGRAY);
         herramientas.addView(contador,
             new LinearLayout.LayoutParams(0,-2,1));
 
-        Button actualizar = boton("↻ Actualizar");
-
-        actualizar.setOnClickListener(v -> cargarCanales());
-
+        Button actualizar=boton("↻ Actualizar");
+        actualizar.setOnClickListener(v->cargarCanales());
         herramientas.addView(actualizar);
-        root.addView(herramientas);
 
-        ScrollView scroll = new ScrollView(this);
+        catalogo.addView(herramientas);
 
-        lista = new LinearLayout(this);
-        lista.setOrientation(LinearLayout.VERTICAL);
-
+        ScrollView scroll=new ScrollView(this);
+        lista=vertical();
         scroll.addView(lista);
 
-        root.addView(scroll,
+        catalogo.addView(scroll,
+            new LinearLayout.LayoutParams(-1,0,1));
+
+        root.addView(catalogo,
             new LinearLayout.LayoutParams(-1,0,1));
 
         setContentView(root);
 
         categoria.setOnItemSelectedListener(
-            new AdapterView.OnItemSelectedListener() {
+            new AdapterView.OnItemSelectedListener(){
+                public void onItemSelected(
+                    AdapterView<?> p,View v,int pos,long id){
+                    mostrar();
+                }
+                public void onNothingSelected(AdapterView<?> p){}
+            });
 
-            public void onItemSelected(
-                AdapterView<?> p,View v,int pos,long id) {
-
-                mostrarCanales();
-            }
-
-            public void onNothingSelected(
-                AdapterView<?> p){}
-        });
-
-        buscador.addTextChangedListener(new TextWatcher(){
-
+        buscar.addTextChangedListener(new TextWatcher(){
             public void beforeTextChanged(
                 CharSequence s,int a,int c,int f){}
-
             public void onTextChanged(
                 CharSequence s,int a,int b,int c){
-
-                mostrarCanales();
+                mostrar();
             }
-
             public void afterTextChanged(Editable e){}
         });
 
-        SessionToken token = new SessionToken(
-            this,
+        SessionToken token=new SessionToken(this,
             new ComponentName(this,PlaybackService.class));
 
-        future = new MediaController.Builder(
-            this,token).buildAsync();
+        future=new MediaController.Builder(this,token)
+            .buildAsync();
 
-        future.addListener(() -> {
+        future.addListener(()->{
+            if(cerrada)return;
+            try{
+                controller=future.get();
 
-            if(cerrada) return;
-
-            try {
-                controller = future.get();
-
-                controller.addListener(
-                    new Player.Listener(){
-
+                controller.addListener(new Player.Listener(){
                     @Override
-                    public void onEvents(
-                        Player p,Player.Events e){
-
+                    public void onEvents(Player p,Player.Events e){
                         actualizarEstado();
                     }
                 });
 
                 actualizarEstado();
-
-            } catch(Exception e) {
+            }catch(Exception e){
                 estado.setText("Error del reproductor");
             }
+        },command->runOnUiThread(command));
 
-        }, command -> runOnUiThread(command));
-
+        reloj.post(cuenta);
         cargarCanales();
     }
 
     private void actualizarEstado(){
+        if(controller==null)return;
 
-        if(controller == null) return;
-
-        CharSequence titulo =
-            controller.getMediaMetadata().title;
-
-        if(titulo != null) {
-            nombreActual.setText(titulo);
-        }
+        CharSequence t=controller.getMediaMetadata().title;
+        if(t!=null)nombre.setText(t);
 
         if(controller.getPlayerError()!=null){
-            estado.setText("Error de emisión · Reconectando");
-        } else if(controller.isPlaying()){
+            estado.setText("Error de emisión");
+        }else if(controller.isPlaying()){
             estado.setText("● EN DIRECTO · Solo audio");
-        } else if(controller.getPlaybackState()
-                    == Player.STATE_BUFFERING){
+        }else if(controller.getPlaybackState()
+            ==Player.STATE_BUFFERING){
             estado.setText("Conectando...");
-        } else {
+        }else{
             estado.setText("Reproductor preparado");
         }
 
-        pausa.setText(controller.getPlayWhenReady()
-            ? "Ⅱ Pausar" : "▶ Reproducir");
+        pausa.setText(controller.getPlayWhenReady()?"Ⅱ":"▶");
+    }
+
+    private void alternar(){
+        if(controller==null)return;
+
+        if(controller.getPlayWhenReady()){
+            controller.pause();
+        }else if(controller.getCurrentMediaItem()!=null){
+            controller.prepare();
+            controller.play();
+        }else{
+            ultimo();
+        }
+    }
+
+    private void cambiar(int paso){
+        if(visibles.isEmpty())return;
+
+        String actual=prefs.getString("lastUrl","");
+        int pos=-1;
+
+        for(int i=0;i<visibles.size();i++){
+            if(visibles.get(i)[1].equals(actual)){
+                pos=i;
+                break;
+            }
+        }
+
+        pos=pos<0?0:
+            (pos+paso+visibles.size())%visibles.size();
+
+        String[] c=visibles.get(pos);
+        reproducir(c[0],c[1],c[2]);
     }
 
     private void temporizador(){
-
-        String[] opciones = {
-            "Desactivado",
-            "15 minutos",
-            "30 minutos",
-            "60 minutos",
-            "90 minutos",
-            "120 minutos"
+        String[] opciones={
+            "Desactivado","15 minutos","30 minutos",
+            "60 minutos","90 minutos","120 minutos"
         };
 
-        int[] minutos = {0,15,30,60,90,120};
+        int[] minutos={0,15,30,60,90,120};
 
         new AlertDialog.Builder(this)
-            .setTitle("Temporizador de apagado")
+            .setTitle("Apagado automático")
             .setItems(opciones,(d,i)->{
-
-                long limite = i==0 ? 0 :
-                    System.currentTimeMillis()
-                    + minutos[i]*60000L;
-
-                prefs.edit()
-                    .putLong("sleepUntil",limite)
-                    .apply();
-
-                dormir.setText(i==0
-                    ? "◷ Temporizador"
-                    : "◷ "+minutos[i]+" min");
-
-                Toast.makeText(this,opciones[i],
-                    Toast.LENGTH_SHORT).show();
-
+                prefs.edit().putLong("sleepUntil",
+                    i==0?0:System.currentTimeMillis()
+                    +minutos[i]*60000L).apply();
             }).show();
     }
 
-    private void ultimoCanal(){
-
-        String url = prefs.getString("lastUrl","");
+    private void ultimo(){
+        String url=prefs.getString("lastUrl","");
 
         if(url.isEmpty()){
-            Toast.makeText(this,
-                "Todavía no has escuchado ningún canal",
+            Toast.makeText(this,"Sin historial",
                 Toast.LENGTH_SHORT).show();
             return;
         }
 
-        reproducir(
-            prefs.getString("lastName","Canal"),
-            url,
-            prefs.getString("lastLogo",""));
+        reproducir(prefs.getString("lastName","Canal"),
+            url,prefs.getString("lastLogo",""));
+    }
+
+    private JSONArray leerHistorial(){
+        try{
+            return new JSONArray(
+                prefs.getString("historial","[]"));
+        }catch(Exception e){
+            return new JSONArray();
+        }
+    }
+
+    private void guardarHistorial(
+        String nombre,String url,String logo){
+
+        try{
+            JSONArray anterior=leerHistorial();
+            JSONArray nuevo=new JSONArray();
+
+            JSONObject item=new JSONObject();
+            item.put("nombre",nombre);
+            item.put("url",url);
+            item.put("logo",logo);
+
+            nuevo.put(item);
+
+            for(int i=0;i<anterior.length()
+                && nuevo.length()<30;i++){
+
+                JSONObject x=anterior.getJSONObject(i);
+
+                if(!x.optString("url").equals(url)){
+                    nuevo.put(x);
+                }
+            }
+
+            prefs.edit().putString(
+                "historial",nuevo.toString()).apply();
+
+        }catch(Exception ignored){}
+    }
+
+    private void historial(){
+        JSONArray h=leerHistorial();
+
+        if(h.length()==0){
+            Toast.makeText(this,"Sin historial",
+                Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        String[] nombres=new String[h.length()];
+
+        for(int i=0;i<h.length();i++){
+            nombres[i]=h.optJSONObject(i).optString("nombre");
+        }
+
+        new AlertDialog.Builder(this)
+            .setTitle("Últimos canales")
+            .setItems(nombres,(d,i)->{
+                JSONObject x=h.optJSONObject(i);
+                reproducir(x.optString("nombre"),
+                    x.optString("url"),
+                    x.optString("logo"));
+            })
+            .setNeutralButton("Borrar historial",(d,w)->
+                prefs.edit().remove("historial").apply())
+            .setNegativeButton("Cerrar",null)
+            .show();
     }
 
     private void cargarCanales(){
+        if(cargando)return;
 
-        if(cargando) return;
-        cargando = true;
+        cargando=true;
+        final boolean esRadio=radio;
+        contador.setText("Actualizando...");
 
-        contador.setText("Actualizando canales...");
+        new Thread(()->{
+            try{
+                String fuente=esRadio
+                    ?"https://www.tdtchannels.com/lists/radio.json"
+                    :"https://www.tdtchannels.com/lists/tv.json";
 
-        new Thread(() -> {
-
-            try {
-
-                java.net.URLConnection conexion =
-                    new URL(
-                    "https://www.tdtchannels.com/lists/tv.json"
-                    ).openConnection();
+                java.net.URLConnection conexion=
+                    new URL(fuente).openConnection();
 
                 conexion.setConnectTimeout(15000);
                 conexion.setReadTimeout(15000);
 
                 String datos;
 
-                try(Scanner sc = new Scanner(
+                try(Scanner sc=new Scanner(
                     conexion.getInputStream(),"UTF-8")){
-
-                    datos = sc.useDelimiter("\\A").next();
+                    datos=sc.useDelimiter("\\A").next();
                 }
 
-                JSONArray paises =
-                    new JSONObject(datos)
+                JSONArray paises=new JSONObject(datos)
                     .getJSONArray("countries");
 
-                ArrayList<String[]> nuevos =
-                    new ArrayList<>();
+                ArrayList<String[]> nuevos=new ArrayList<>();
 
                 for(int i=0;i<paises.length();i++){
 
-                    JSONObject pais =
-                        paises.getJSONObject(i);
+                    JSONObject pais=paises.getJSONObject(i);
+                    String np=normal(pais.optString("name"));
 
-                    String nombrePais =
-                        normal(pais.optString("name"));
+                    if(!np.isEmpty()&&!np.equals("espana")
+                        &&!np.equals("spain"))continue;
 
-                    if(!nombrePais.isEmpty()
-                        && !nombrePais.equals("espana")
-                        && !nombrePais.equals("spain")) continue;
-
-                    JSONArray regiones =
-                        pais.getJSONArray("ambits");
+                    JSONArray regiones=pais.getJSONArray("ambits");
 
                     for(int j=0;j<regiones.length();j++){
 
-                        JSONObject region =
-                            regiones.getJSONObject(j);
+                        JSONObject region=regiones.getJSONObject(j);
 
-                        JSONArray cadenas =
-                            region.getJSONArray("channels");
+                        JSONArray cadenas=region.getJSONArray("channels");
 
                         for(int k=0;k<cadenas.length();k++){
 
-                            JSONObject canal =
-                                cadenas.getJSONObject(k);
+                            JSONObject canal=cadenas.getJSONObject(k);
 
-                            JSONArray opciones =
-                                canal.optJSONArray("options");
+                            JSONArray opciones=canal.optJSONArray("options");
 
-                            if(opciones==null) continue;
+                            if(opciones==null)continue;
 
                             for(int n=0;n<opciones.length();n++){
 
-                                String url = opciones
-                                    .getJSONObject(n)
-                                    .optString("url");
+                                JSONObject opcion=opciones.getJSONObject(n);
+
+                                String url=opcion.optString("url");
+                                String formato=normal(opcion.optString("format"));
+                                String u=normal(url);
+
+                                boolean audio=esRadio&&(
+                                    formato.contains("mp3")
+                                    ||formato.contains("aac")
+                                    ||formato.contains("stream")
+                                    ||formato.contains("ogg")
+                                    ||formato.contains("m3u8")
+                                    ||u.contains(".mp3")
+                                    ||u.contains(".aac")
+                                    ||u.contains(".ogg"));
 
                                 if(url.startsWith("https://")
-                                    && url.contains(".m3u8")){
+                                    &&(u.contains(".m3u8")||audio)){
 
                                     nuevos.add(new String[]{
                                         canal.optString("name"),
@@ -533,232 +596,184 @@ root.addView(tipo);
                 }
 
                 runOnUiThread(()->{
-
-                    if(cerrada) return;
-
-                    cargando = false;
+                    if(cerrada)return;
+                    cargando=false;
                     canales.clear();
                     canales.addAll(nuevos);
-                    mostrarCanales();
+                    mostrar();
                 });
 
             }catch(Exception e){
-
                 runOnUiThread(()->{
-                    cargando = false;
-
-                    if(!cerrada){
-                        contador.setText(
-                            "Error al cargar · Pulsa Actualizar");
-                    }
+                    cargando=false;
+                    if(!cerrada)
+                        contador.setText("Error · Pulsa Actualizar");
                 });
             }
-
         }).start();
     }
 
-    private String normal(String s){
-
-        return Normalizer.normalize(
-            s,Normalizer.Form.NFD)
-            .replaceAll("\\p{M}","")
-            .toLowerCase(Locale.ROOT);
-    }
-
-    private void mostrarCanales(){
-
-        if(lista==null || cerrada) return;
+    private void mostrar(){
+        if(lista==null||cerrada)return;
 
         lista.removeAllViews();
+        visibles.clear();
 
-        String filtro =
-            normal(buscador.getText().toString());
+        String filtro=normal(buscar.getText().toString());
+        int seleccion=categoria.getSelectedItemPosition();
 
-        int seleccion =
-            categoria.getSelectedItemPosition();
+        for(String[] c:canales){
 
-        int cantidad=0;
+            String n=normal(c[0]);
+            String region=normal(c[3]);
 
-        for(String[] canal:canales){
+            boolean fav=prefs.getBoolean("fav:"+c[0],false);
+            boolean nacional=region.contains("nacional");
 
-            String nombre=canal[0];
-            String n=normal(nombre);
-            String region=normal(canal[3]);
+            boolean noticias=n.matches(
+                ".*(noticias|24 horas|24h|news|informacion).*");
 
-            boolean favorito =
-                prefs.getBoolean("fav:"+nombre,false);
+            boolean deportes=n.matches(
+                ".*(deporte|marca|sport|gol play|real madrid).*");
 
-            boolean nacional =
-                region.contains("nacional");
+            boolean musica=n.matches(
+                ".*(musica|rock|radio 3|los40|dial|kiss|europa fm|cadena 100|melodia|hit).*");
 
-            boolean noticias =
-                n.matches(".*(24 horas|24h|noticias|news|informacion).*");
+            if(!n.contains(filtro))continue;
+            if(seleccion==1&&!fav)continue;
+            if(seleccion==2&&!nacional)continue;
+            if(seleccion==3&&nacional)continue;
+            if(seleccion==4&&!noticias)continue;
+            if(seleccion==5&&!deportes)continue;
+            if(seleccion==6&&!musica)continue;
 
-            boolean deportes =
-                n.matches(".*(deporte|sport|gol play|real madrid|realmadrid).*");
+            visibles.add(c);
 
-            if(!n.contains(filtro)) continue;
-            if(seleccion==1 && !favorito) continue;
-            if(seleccion==2 && !nacional) continue;
-            if(seleccion==3 && nacional) continue;
-            if(seleccion==4 && !noticias) continue;
-            if(seleccion==5 && !deportes) continue;
-
-            cantidad++;
-
-            LinearLayout fila = new LinearLayout(this);
-
+            LinearLayout fila=new LinearLayout(this);
             fila.setGravity(Gravity.CENTER_VERTICAL);
-            fila.setPadding(dp(8),dp(4),dp(4),dp(4));
-            fila.setBackground(redondo(tarjeta));
+            fila.setPadding(dp(6),dp(3),dp(6),dp(3));
+            fila.setBackground(forma(tarjeta));
 
-            ImageView logo = new ImageView(this);
-
-            logo.setScaleType(
-                ImageView.ScaleType.FIT_CENTER);
-
-            logo.setImageResource(
-                android.R.drawable.ic_media_play);
+            ImageView logo=new ImageView(this);
+            logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            logo.setImageResource(android.R.drawable.ic_media_play);
 
             fila.addView(logo,
                 new LinearLayout.LayoutParams(dp(48),dp(42)));
 
-            Button canalBoton = boton(nombre);
+            Button b=boton(c[0]);
+            b.setGravity(Gravity.CENTER_VERTICAL);
+            b.setOnClickListener(v->reproducir(c[0],c[1],c[2]));
 
-            canalBoton.setGravity(Gravity.CENTER_VERTICAL);
+            fila.addView(b,new LinearLayout.LayoutParams(0,-2,1));
 
-            canalBoton.setOnClickListener(v ->
-                reproducir(nombre,canal[1],canal[2]));
+            Button estrella=boton(fav?"★":"☆");
 
-            fila.addView(canalBoton,
-                new LinearLayout.LayoutParams(0,-2,1));
+            estrella.setTextSize(23);
+            estrella.setTextColor(fav?Color.YELLOW:Color.LTGRAY);
 
-            Button fav = boton(favorito?"★":"☆");
+            estrella.setOnClickListener(v->{
+                boolean nuevo=!prefs.getBoolean("fav:"+c[0],false);
 
-            fav.setTextSize(23);
-            fav.setTextColor(favorito
-                ? Color.rgb(250,204,21)
-                : Color.LTGRAY);
+                prefs.edit().putBoolean("fav:"+c[0],nuevo).apply();
 
-            fav.setContentDescription("Favorito "+nombre);
+                estrella.setText(nuevo?"★":"☆");
+                estrella.setTextColor(nuevo
+                    ?Color.YELLOW:Color.LTGRAY);
 
-            fav.setOnClickListener(v -> {
-
-                boolean nuevo =
-                    !prefs.getBoolean("fav:"+nombre,false);
-
-                prefs.edit()
-                    .putBoolean("fav:"+nombre,nuevo)
-                    .apply();
-
-                fav.setText(nuevo?"★":"☆");
-
-                fav.setTextColor(nuevo
-                    ? Color.rgb(250,204,21)
-                    : Color.LTGRAY);
-
-                if(seleccion==1) mostrarCanales();
+                if(seleccion==1)mostrar();
             });
 
-            fila.addView(fav,
+            fila.addView(estrella,
                 new LinearLayout.LayoutParams(dp(48),-2));
 
-            LinearLayout.LayoutParams lp =
+            LinearLayout.LayoutParams lp=
                 new LinearLayout.LayoutParams(-1,-2);
 
             lp.setMargins(0,0,0,dp(5));
 
             lista.addView(fila,lp);
-
-            cargarLogo(canal[2],logo);
+            logo(c[2],logo);
         }
 
-        contador.setText(cantidad+" canales");
+        contador.setText(visibles.size()
+            +(radio?" emisoras":" canales"));
     }
 
-    private void cargarLogo(String url,ImageView vista){
+    private void logo(String url,ImageView vista){
+        if(!url.startsWith("https://")||cerrada)return;
 
-        if(!url.startsWith("https://") || cerrada) return;
-
-        Bitmap guardado = cache.get(url);
-
-        if(guardado!=null){
-            vista.setImageBitmap(guardado);
+        Bitmap b=cache.get(url);
+        if(b!=null){
+            vista.setImageBitmap(b);
             return;
         }
 
         imagenes.execute(()->{
-
             try{
-
-                java.net.URLConnection c =
+                java.net.URLConnection c=
                     new URL(url).openConnection();
 
                 c.setConnectTimeout(5000);
                 c.setReadTimeout(5000);
 
-                try(java.io.InputStream in =
-                    c.getInputStream()){
+                try(java.io.InputStream in=c.getInputStream()){
+                    Bitmap img=BitmapFactory.decodeStream(in);
 
-                    Bitmap b =
-                        BitmapFactory.decodeStream(in);
-
-                    if(b!=null){
-
-                        cache.put(url,b);
+                    if(img!=null){
+                        cache.put(url,img);
 
                         runOnUiThread(()->{
-                            if(!cerrada)
-                                vista.setImageBitmap(b);
+                            if(!cerrada)vista.setImageBitmap(img);
                         });
                     }
                 }
-
             }catch(Exception ignored){}
         });
     }
 
     private void reproducir(
-        String nombre,String url,String logo){
+        String titulo,String url,String logo){
 
-        if(controller==null){
-            estado.setText("Preparando reproductor");
-            return;
-        }
+        if(controller==null)return;
 
         prefs.edit()
-            .putString("lastName",nombre)
+            .putString("lastName",titulo)
             .putString("lastUrl",url)
             .putString("lastLogo",logo)
             .apply();
 
-        MediaMetadata.Builder metadata =
+        guardarHistorial(titulo,url,logo);
+
+        MediaMetadata.Builder metadata=
             new MediaMetadata.Builder()
-                .setTitle(nombre)
+                .setTitle(titulo)
                 .setArtist("TV Radio España");
 
         if(logo.startsWith("https://")){
-            metadata.setArtworkUri(
-                android.net.Uri.parse(logo));
+            metadata.setArtworkUri(android.net.Uri.parse(logo));
         }
 
-        MediaItem item = new MediaItem.Builder()
+        MediaItem.Builder item=new MediaItem.Builder()
             .setUri(url)
-            .setMediaMetadata(metadata.build())
-            .build();
+            .setMediaMetadata(metadata.build());
 
-        controller.setMediaItem(item);
+        if(normal(url).contains(".m3u8")){
+            item.setMimeType(MimeTypes.APPLICATION_M3U8);
+        }
+
+        controller.setMediaItem(item.build());
         controller.prepare();
         controller.play();
 
-        nombreActual.setText(nombre);
+        nombre.setText(titulo);
         estado.setText("Conectando...");
     }
 
     @Override
     protected void onDestroy(){
-
         cerrada=true;
+        reloj.removeCallbacksAndMessages(null);
         imagenes.shutdownNow();
 
         if(future!=null){
