@@ -249,7 +249,30 @@ public class MainActivity extends Activity {
                 }));
 
         root.addView(categoria);
+LinearLayout tipo = new LinearLayout(this);
 
+Button television = boton("📺 Televisión");
+Button radio = boton("📻 Radio");
+
+television.setOnClickListener(v -> {
+    if(cargando) return;
+    modoRadio = false;
+    cargarCanales();
+});
+
+radio.setOnClickListener(v -> {
+    if(cargando) return;
+    modoRadio = true;
+    cargarCanales();
+});
+
+tipo.addView(television,
+    new LinearLayout.LayoutParams(0,-2,1));
+
+tipo.addView(radio,
+    new LinearLayout.LayoutParams(0,-2,1));
+
+root.addView(tipo);
         LinearLayout herramientas = new LinearLayout(this);
         herramientas.setGravity(Gravity.CENTER_VERTICAL);
 
