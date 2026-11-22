@@ -51,7 +51,7 @@ body.car #catalog{display:none}body.car .big{min-width:74px;min-height:78px;font
  <audio id="media" playsinline preload="none"></audio>
 </section>
 <section id="catalog" class="panel" aria-label="Listado de canales">
- <div class="tabs"><button id="tv" class="active">📺 Televisión</button><button id="radio">📻 Radio</button><button id="playlist">📋 Mis listas M3U</button><button id="refresh">↻ Actualizar</button></div>
+ <div class="tabs"><button id="all" class="active">📚 Todos</button><button id="tv">📺 Televisión</button><button id="radio">📻 Radio</button><button id="playlist">📋 Mis listas M3U</button><button id="refresh">↻ Actualizar</button></div>
  <details class="m3u-panel" id="m3uTools"><summary>➕ Añadir lista M3U / M3U8</summary><p class="muted">Importa tu archivo .m3u o pega la dirección HTTPS de una lista. Se guarda únicamente en este navegador, no en GitHub.</p><label class="muted" for="m3uFile">Desde archivo</label><input type="file" id="m3uFile" accept=".m3u,.m3u8,.txt,audio/x-mpegurl,application/vnd.apple.mpegurl,text/plain"><div class="toolbar"><input type="url" id="m3uUrl" placeholder="https://ejemplo.com/playlist.m3u" aria-label="Dirección URL M3U"><button id="m3uImport">Importar URL</button></div><div class="toolbar"><button id="m3uClear">Borrar mi lista</button></div><p id="m3uResult" class="muted" aria-live="polite"></p><p class="muted">Las URL deben permitir acceso desde el navegador (CORS). Solo se admiten conexiones HTTPS; algunas emisiones pueden estar bloqueadas o no tener audio reproducible.</p></details>
  <div id="searchline"><input id="search" type="search" placeholder="Buscar canal o emisora..." aria-label="Buscar canal"></div>
  <div class="filters"><select id="category" aria-label="Filtrar canales"><option value="all">Todos los canales</option><option value="fav">★ Favoritos</option><option value="national">Nacionales</option><option value="regional">Autonómicos / locales</option><option value="news">Noticias</option><option value="sports">Deportes</option><option value="music">Música</option></select></div>
@@ -73,7 +73,7 @@ const fallback=[
 {name:'La Séptima (nacional)',web:'https://laseptima.com/',kind:'tv',region:'Nacional'},
 {name:'La 7 (CyLTV)',web:'https://www.cyltv.es/',kind:'tv',region:'Castilla y León'}
 ];
-let mode='tv',channels=[],visible=[],active=null,hls=null,offAt=0,installPrompt=null;
+let mode='all',channels=[],visible=[],active=null,hls=null,offAt=0,installPrompt=null;
 let myPlaylist=get('personal_m3u',[]);
 const media=$('media'),status=$('status');
 const get=(key,def)=>{try{return JSON.parse(localStorage.getItem('tr_'+key))??def}catch{return def}};
@@ -112,29 +112,39 @@ function parseFeed(data,kind){
  const seen=new Set();
  return result.filter(x=>{const key=norm(x.name)+'|'+norm(x.region);if(seen.has(key))return false;seen.add(key);return true});
 }
-async function load(){
- if(mode==='m3u'){channels=myPlaylist;render();return}
- const kind=mode;msg('');$('count').textContent='Actualizando canales...';
+async function fetchChannels(kind){
  const sources=[feed[kind],'https://raw.githubusercontent.com/LaQuay/TDTChannels/master/'+(kind==='tv'?'tv.json':'radio.json')];
  for(const url of sources){
   try{
    const res=await fetch(url,{cache:'no-store'});if(!res.ok)throw Error('HTTP '+res.status);
-   const data=await res.json();if(kind!==mode)return;
-   const list=parseFeed(data,kind);if(!list.length)throw Error('Lista vacía');
-   channels=list;put('cache_'+kind,list);render();return;
+   const list=parseFeed(await res.json(),kind);if(list.length<5)throw Error('Lista incompleta');
+   put('cache_'+kind,list);return list;
   }catch(e){}
  }
- if(kind!==mode)return;
- channels=get('cache_'+kind,[]);
+ const cache=get('cache_'+kind,[]);
  if(kind==='tv'){
-  for(const f of fallback)if(!channels.some(x=>norm(x.name)===norm(f.name)||(f.name==='La Séptima (nacional)'&&norm(x.name)==='la septima')))channels.unshift({...f,url:'',logo:''});
+  for(const f of fallback)if(!cache.some(x=>norm(x.name)===norm(f.name)))cache.unshift({...f,url:'',logo:''});
  }
- render();msg(channels.length?'Se muestra la última lista guardada.':'No se pudo descargar la lista. Comprueba tu conexión.');
+ return cache;
+}
+async function load(){
+ const kind=mode;msg('');$('count').textContent='Actualizando canales...';
+ if(kind==='m3u'){channels=myPlaylist;render();return}
+ if(kind==='all'){
+  // Todas las fuentes juntas: el usuario no pierde la televisión o radio al importar M3U.
+  const [tv,radio]=await Promise.all([fetchChannels('tv'),fetchChannels('radio')]);
+  if(kind!==mode)return;
+  channels=[...tv,...radio,...myPlaylist];render();
+  if(!tv.length||!radio.length)msg('Algunas listas no han cargado; se muestran los canales disponibles.');
+  return;
+ }
+ const list=await fetchChannels(kind);if(kind!==mode)return;
+ channels=list;render();if(!list.length)msg('No se pudo descargar esta lista. Comprueba tu conexión.');
 }
 function render(){
  const q=norm($('search').value),cat=$('category').value;
  visible=channels.filter(c=>{
-  if(!norm(c.name).includes(q))return false;
+  if(!norm(c.name+' '+c.region).includes(q))return false;
   const n=norm(c.name),r=norm(c.region);
   if(cat==='fav'&&!fav[c.kind+'|'+c.name])return false;
   if(cat==='national'&&!/nacional|general/.test(r))return false;
@@ -144,7 +154,7 @@ function render(){
   if(cat==='music'&&!/musica|radio 3|los40|dial|rock|kiss|melodia|hit|cadena 100/.test(n))return false;
   return true;
  });
- $('count').textContent=visible.length+(mode==='radio'?' emisoras':' canales')+' · '+channels.filter(c=>!!c.url).length+' con señal directa';
+ $('count').textContent=visible.length+' canales y emisoras · '+channels.filter(c=>!!c.url).length+' con señal directa · '+myPlaylist.length+' M3U propios';
  const holder=$('list');holder.replaceChildren();
  for(const ch of visible){
   const row=document.createElement('div');row.className='row';
@@ -195,8 +205,8 @@ $('car').onclick=()=>{document.body.classList.toggle('car');$('car').textContent
 $('night').onclick=()=>{document.body.classList.toggle('darkest');document.body.style.setProperty('--f',document.body.classList.contains('darkest')?'#000':'#101827')};
 $('timer').onclick=()=>{const n=prompt('Apagado automático: minutos (0 para cancelar)', '30');if(n===null)return;const v=Number(n);if(!Number.isFinite(v)||v<0||v>240){msg('Introduce entre 0 y 240 minutos');return}offAt=v?Date.now()+v*60000:0;$('mini').textContent=v?'Apagado en '+v+' minutos':'Temporizador desactivado'};
 setInterval(()=>{if(!offAt)return;const left=offAt-Date.now();if(left<=0){offAt=0;cleanPlayer();$('mini').textContent='Temporizador finalizado';return}$('mini').textContent='Apagado en '+Math.ceil(left/60000)+' min'},1000);
-$('tv').onclick=()=>switchMode('tv');$('radio').onclick=()=>switchMode('radio');$('playlist').onclick=()=>switchMode('m3u');
-function switchMode(kind){if(kind===mode)return;mode=kind;$('tv').classList.toggle('active',mode==='tv');$('radio').classList.toggle('active',mode==='radio');$('playlist').classList.toggle('active',mode==='m3u');$('category').value='all';channels=[];render();load()}
+$('all').onclick=()=>switchMode('all');$('tv').onclick=()=>switchMode('tv');$('radio').onclick=()=>switchMode('radio');$('playlist').onclick=()=>switchMode('m3u');
+function switchMode(kind){if(kind===mode)return;mode=kind;$('all').classList.toggle('active',mode==='all');$('tv').classList.toggle('active',mode==='tv');$('radio').classList.toggle('active',mode==='radio');$('playlist').classList.toggle('active',mode==='m3u');$('category').value='all';channels=[];render();load()}
 $('refresh').onclick=load;
 
 function parseM3U(text){
@@ -229,7 +239,7 @@ function savePlaylist(items){
  if(size>1800000)throw Error('La lista ocupa demasiado espacio para guardarla aquí.');
  myPlaylist=items;put('personal_m3u',myPlaylist);
  $('m3uResult').textContent='✓ '+items.length+' canales importados. Guardados en este navegador.';
- switchMode('m3u');channels=myPlaylist;render();
+ switchMode('all');channels=[...channels,...myPlaylist];load();
 }
 $('m3uFile').addEventListener('change',async e=>{
  const file=e.target.files?.[0];if(!file)return;
@@ -255,7 +265,7 @@ $('m3uImport').onclick=async()=>{
 $('m3uClear').onclick=()=>{
  if(!confirm('¿Borrar los canales M3U guardados en este navegador?'))return;
  myPlaylist=[];put('personal_m3u',[]);$('m3uResult').textContent='Lista borrada.';
- if(mode==='m3u'){channels=[];render()}
+ if(mode==='m3u'||mode==='all')load()
 };
 $('search').oninput=render;$('category').onchange=render;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('install').hidden=false});
