@@ -1,0 +1,53 @@
+name: Actualizar canales web
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '20 4,16 * * *'
+  push:
+    paths:
+      - '.github/workflows/actualizar-canales.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: actualizar-canales-web
+  cancel-in-progress: false
+
+jobs:
+  actualizar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Descargar catálogos públicos TDTChannels
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, urllib.request
+          folder=pathlib.Path('data')
+          folder.mkdir(exist_ok=True)
+          for kind in ('tv','radio'):
+              url=f'https://www.tdtchannels.com/lists/{kind}.json'
+              req=urllib.request.Request(url,headers={'User-Agent':'TVRadioEspana/1.0'})
+              with urllib.request.urlopen(req,timeout=40) as response:
+                  data=json.load(response)
+              assert isinstance(data.get('countries'),list) and len(data['countries'])>0
+              channels=sum(len(a.get('channels',[])) for c in data['countries'] for a in c.get('ambits',[]))
+              assert channels>50, f'{kind}: catálogo incompleto ({channels})'
+              out=folder/(kind+'.json')
+              out.write_text(json.dumps(data,ensure_ascii=False,separators=(',',':'))+'\n',encoding='utf-8')
+              print(kind,channels,'canales')
+          PY
+      - name: Publicar listas nuevas si cambian
+        run: |
+          if ! git diff --quiet -- data/ || [ -n "$(git ls-files --others --exclude-standard data/)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add data/tv.json data/radio.json
+            git commit -m "Actualizar catálogos web desde TDTChannels"
+            git push
+          else
+            echo "Los catálogos no han cambiado."
+          fi
